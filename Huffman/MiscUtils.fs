@@ -1,5 +1,7 @@
 ﻿module MiscUtils
 
+open System.Diagnostics
+
 /// Inserts an element into a list, with the order given by the specified function.
 let insert f xs n =
     let nValue = f n
@@ -22,3 +24,10 @@ let sizeDesc size =
         elif size >= KILO then size / KILO, "KB"
         else size, "bytes"
     sprintf "%g %s" size unit
+
+let time fn =
+    let sw = new Stopwatch()
+    sw.Start()
+    let result = fn()
+    sw.Stop()
+    sw.ElapsedMilliseconds, result
