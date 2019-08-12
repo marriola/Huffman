@@ -23,7 +23,7 @@ let sizeDesc size =
         elif size >= MEGA then size / MEGA, "MB"
         elif size >= KILO then size / KILO, "KB"
         else size, "bytes"
-    sprintf "%g %s" size unit
+    sprintf "%1.3g %s" size unit
 
 let time fn =
     let sw = new Stopwatch()

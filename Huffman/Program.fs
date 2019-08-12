@@ -14,7 +14,7 @@ let decode options =
     let inputFile = options.InputFile()
     let content = File.ReadAllBytes(inputFile)
     let contentStart = bytesToInt content 0
-    let tree = content |> Array.skip 4 |> HuffmanTree.fromBytes
+    let treeMillisec, tree = time (fun () -> content |> Array.skip 4 |> HuffmanTree.fromBytes)
     let textLength = bytesToInt content contentStart
 
     let elapsedMillisec, decoded = time (fun () -> HuffmanTree.decode (contentStart + 4) textLength tree content)
@@ -23,7 +23,8 @@ let decode options =
         (new BinaryWriter(File.Open(options.OutputFile, FileMode.Create)))
         (fun w -> w.Write(decoded))
 
-    printfn "decoded in %dms" elapsedMillisec
+    printfn "decoded tree in %dms" treeMillisec
+    printfn "decoded text in %dms" elapsedMillisec
 
     let decompressionRate = (float decoded.Length) / (float elapsedMillisec / 1000.0) |> int
     printfn "decompression rate %s/sec" (sizeDesc decompressionRate)
@@ -32,7 +33,7 @@ let decode options =
     let metadataLength = contentStart + 4
     let decodedLength = decoded.Length
 
-    printfn "%g%% inflation ratio (%d bytes Huffman tree + %s compressed text -> %s)"
+    printfn "%1.3g%% inflation ratio (%d bytes Huffman tree + %s compressed text -> %s)"
         ((float decodedLength) / (float originalLength) * 100.0)
         metadataLength
         (sizeDesc (originalLength - metadataLength))
@@ -40,10 +41,37 @@ let decode options =
 
     0
 
+type FooBar =
+    { Symbol: string
+      Frequency: int
+      Code: string }
+
 let encode options =
     let inputFile = options.InputFile()
     let content = File.ReadAllBytes(inputFile)
-    let tree = HuffmanTree.fromContent content
+    let treeMillisec, tree = time (fun () -> HuffmanTree.fromContent content)
+    let codeTable = HuffmanTree.makeCodeTable tree
+
+    // Show the code table with symbol frequencies
+    query {
+        for (symbol, freq) in Seq.countBy id content do
+            join (s, code) in codeTable
+                on (symbol = byte s)
+            sortByDescending freq
+            thenBy (snd code)
+            select {
+                Symbol =
+                    match symbol with
+                    | 32uy -> "space"
+                    | 13uy -> "CR"
+                    | 10uy -> "LF"
+                    | _ when symbol > 32uy && symbol < 127uy -> sprintf "'%c'" (char symbol)
+                    | _ -> sprintf "0x%02x" symbol
+                Frequency = freq
+                Code = toBin (fst code) (snd code)
+            }
+    }
+    |> Seq.iter (fun x -> printfn "%s\t%d\t%s" x.Symbol x.Frequency x.Code)
 
     let elapsedMillisec, (encodedLengthBits, encoded) = time (fun () -> HuffmanTree.encode tree content)
     let treeBytes = HuffmanTree.toBytes tree
@@ -62,12 +90,13 @@ let encode options =
             w.Write(encodedLengthBits)
             w.Write(encoded))
 
+    printfn "\nbuilt tree in %dms" treeMillisec
     printfn "encoded in %dms" elapsedMillisec
 
     let compressionRate = (float content.Length) / (float elapsedMillisec / 1000.0) |> int
     printfn "compression rate %s/sec" (sizeDesc compressionRate)
 
-    printfn "%g%% compression ratio (%s -> %d bytes Huffman tree + %s text)"
+    printfn "%1.3g%% compression ratio (%s -> %d bytes Huffman tree + %s text)"
         ((1.0 - (float encodedLengthWithTable) / (float content.Length)) * 100.0)
         (sizeDesc originalLength)
         (metadataLength + 4)

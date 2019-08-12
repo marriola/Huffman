@@ -8,19 +8,9 @@ module HuffmanTree =
     open BinUtils
     open MiscUtils
 
-    let private getLeft tree =
-        match tree with
-        | Leaf _ -> failwith "Leaves don't have children"
-        | Node (_, _, left, _) -> left
-    
-    let private getRight tree =
-        match tree with
-        | Leaf _ -> failwith "Leaves don't have children"
-        | Node (_, _, _, right) -> right
-
     let private getWeight tree =
         match tree with
-        | Leaf (_, weight) -> weight
+        | Leaf (_, weight)
         | Node (_, weight, _, _) -> weight
 
     let private getNameAndWeight tree =
