@@ -26,7 +26,21 @@ let decode options =
         (new BinaryWriter(File.Open(options.OutputFile, FileMode.Create)))
         (fun w -> w.Write(decoded))
 
-    printf "decoded in %dms" sw.ElapsedMilliseconds
+    printfn "decoded in %dms" sw.ElapsedMilliseconds
+
+    let decompressionRate = (float decoded.Length) / (float sw.ElapsedMilliseconds / 1000.0) |> int
+    printfn "decompression rate %s/sec" (sizeDesc decompressionRate)
+
+    let originalLength = content.Length
+    let metadataLength = contentStart + 4
+    let decodedLength = decoded.Length
+
+    printfn "%g%% inflation ratio (%d bytes Huffman tree + %s compressed text -> %s)"
+        ((float decodedLength) / (float originalLength) * 100.0)
+        metadataLength
+        (sizeDesc (originalLength - metadataLength))
+        (sizeDesc decodedLength)
+
     0
 
 let encode options =
@@ -36,28 +50,35 @@ let encode options =
 
     let sw = new Stopwatch()
     sw.Start()
-    let encodedLength, encoded = HuffmanTree.encode tree content
+    let encodedLengthBits, encoded = HuffmanTree.encode tree content
     sw.Stop()
 
     let treeBytes = HuffmanTree.toBytes tree
-    let encodedLengthWithTable = encoded.Length + treeBytes.Length
+
+    let originalLength = content.Length
+    let metadataLength = treeBytes.Length + 12
+    let encodedLength = encoded.Length
+    let encodedLengthWithTable = encodedLength + metadataLength
 
     using
         (new BinaryWriter(File.Open(options.OutputFile, FileMode.Create)))
         (fun w ->
-            w.Write(treeBytes.Length + 8)
+            w.Write(metadataLength)
             w.Write(treeBytes)
             w.Write("ZZZZ" |> Seq.map byte |> Array.ofSeq)
-            w.Write(encodedLength)
+            w.Write(encodedLengthBits)
             w.Write(encoded))
 
-    printfn
-        "\nencoded in %dms\n%g%% compression ratio (%s -> %d bytes Huffman tree + %s text)\n"
-        sw.ElapsedMilliseconds
+    printfn "encoded in %dms" sw.ElapsedMilliseconds
+
+    let compressionRate = (float content.Length) / (float sw.ElapsedMilliseconds / 1000.0) |> int
+    printfn "compression rate %s/sec" (sizeDesc compressionRate)
+
+    printfn "%g%% compression ratio (%s -> %d bytes Huffman tree + %s text)"
         ((1.0 - (float encodedLengthWithTable) / (float content.Length)) * 100.0)
-        (sizeDesc content.Length)
-        treeBytes.Length
-        (sizeDesc encoded.Length)
+        (sizeDesc originalLength)
+        metadataLength
+        (sizeDesc encodedLength)
 
     0
     
