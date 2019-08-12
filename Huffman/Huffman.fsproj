@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>netcoreapp3.0</TargetFramework>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="MiscUtils.fs" />
+    <Compile Include="BinUtils.fs" />
+    <Compile Include="HuffmanTree.fs" />
+    <Compile Include="CommandLineOptions.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+</Project>
