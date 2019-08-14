@@ -2,9 +2,50 @@
 
 open System
 
+type CodeLength = CodeLength of int
+type HuffmanCode = HuffmanCode of int
+type CodeTableEntry = CodeLength * HuffmanCode
+
 type HuffmanTree =
     | Leaf of char * int
     | Node of string * int * HuffmanTree * HuffmanTree
+
+type DecodingResult = {
+    /// The time in milliseconds it took to parse the tree.
+    TreeParseMilliseconds: int
+
+    /// The time in milliseconds it took to decode the content.
+    DecodeMilliseconds: int
+    
+    /// The Huffman tree stored in the content.
+    Tree: HuffmanTree
+
+    /// The total number of bytes used to store metadata (including the Huffman tree).
+    MetadataLength: int
+
+    /// The decoded content.
+    Output: byte[]
+}
+
+type EncodingResult = {
+    /// The time in milliseconds it took to build the Huffman tree.
+    TreeBuildMilliseconds: int
+
+    /// The time in milliseconds it took to encode the content.
+    EncodeMilliseconds: int 
+
+    /// The generated code table.
+    CodeTable: (char * CodeTableEntry) list
+
+    /// The generated Huffman tree in packed binary format.
+    Tree: byte[]
+
+    /// The number of unused bits at the end of the encoded content.
+    PaddingBits: byte
+
+    /// The encoded content.
+    Output: byte[]
+}
 
 module HuffmanTree =
     open BinUtils
@@ -37,7 +78,7 @@ module HuffmanTree =
     let private insertNode = insert getWeight
 
     /// Converts a Huffman tree to packed binary format.
-    let toBytes tree =
+    let private toBytes tree =
         let rec inner subtree out =
             match subtree with
             | Leaf (symbol, _) ->
@@ -52,7 +93,7 @@ module HuffmanTree =
         |> packBits
 
     /// Parses a Huffman tree from packed binary format.
-    let fromBytes (bytes: byte[]) =
+    let private fromBytes (bytes: byte[]) =
         let rec inner bits =
             let next, bits = List.head bits, List.tail bits
             match next with
@@ -71,7 +112,7 @@ module HuffmanTree =
         |> snd
 
     /// Creates a Huffman tree from a byte array.
-    let fromContent (str: byte[]) =
+    let private fromContent (str: byte[]) =
         let rec inner queue =
             match queue with
             | [tree] -> tree
@@ -89,7 +130,7 @@ module HuffmanTree =
         |> inner
 
     /// Creates a code table from a Huffman tree.
-    let makeCodeTable tree =
+    let private makeCodeTable tree =
         let rec inner subtree out code =
             match subtree with
             | Leaf (c, _) ->
@@ -102,53 +143,81 @@ module HuffmanTree =
                             then int (2.0 ** float i)
                             else 0)
                     |> List.sum
-                (c, (codeLength, intCode)) :: out
+                (c, (CodeLength codeLength, HuffmanCode intCode)) :: out
             | Node (_, _, left, right) ->
                 let out = inner left out (false :: code)
                 let out = inner right out (true :: code)
                 out
         inner tree [] []
-        
-    /// Encodes a string using a Huffman tree.
-    let encode tree content =
-        let codeTable =
-            tree
-            |> makeCodeTable
-            |> Seq.map (fun (symbol, (codeLength, code)) ->
+
+    let private encodeBytes codeTable content =
+        let codeDict =
+            codeTable
+            |> Seq.map (fun (symbol, (CodeLength codeLength, HuffmanCode code)) ->
                 (byte symbol, (codeLength, code)))
             |> Map.ofSeq
-        let bits = Seq.map (fun c -> codeTable.[c]) content
+
+        let bits = Seq.map (fun c -> codeDict.[c]) content
         let bytesOut = packBits bits
+
         let numBits =
             bits
             |> Seq.map (fun (n, _) -> n)
             |> Seq.sum
+
         let numBytes = (float numBits) / 8.0
         let totalBits = int (Math.Ceiling(numBytes) * 8.0)
         let numPaddingBits = byte (totalBits - numBits)
+
         numPaddingBits, bytesOut
-        
-    let decode startPosition numPaddingBits tree content =
-        let rec inner subtree out bits =
+            
+    let private decodeBytes contentStart numPaddingBits tree content =
+        let rec inner root subtree out bits =
             match bits, subtree with
             | [], Node _ ->
                 failwith "Ran out of input"
             | [], Leaf (symbol, _) ->
                 byte symbol :: out |> List.rev
             | _, Leaf (symbol, _) ->
-                inner tree (byte symbol :: out) bits
+                inner root root (byte symbol :: out) bits
             | false::xs, Node (_, _, left, _) ->
-                inner left out xs
+                inner root left out xs
             | true::xs, Node (_, _, _, right) ->
-                inner right out xs
+                inner root right out xs
 
         let bits =
             content
-            |> Seq.skip startPosition
+            |> Seq.skip (contentStart + 1)
             |> toBitStream
-
+            
         bits
         |> Seq.take (Seq.length bits - numPaddingBits)
         |> List.ofSeq
-        |> inner tree []
+        |> inner tree tree []
         |> Array.ofList
+
+    /// Creates a Huffman tree for the content and encodes it.
+    let encode content =
+        let treeMillisec, tree = time (fun () -> fromContent content)
+        let codeTable = makeCodeTable tree
+        let elapsedMillisec, (numPaddingBits, bytesOut) = time (fun () -> encodeBytes codeTable content)
+        
+        { TreeBuildMilliseconds = int treeMillisec
+          EncodeMilliseconds = int elapsedMillisec
+          CodeTable = codeTable
+          Tree = toBytes tree 
+          PaddingBits = numPaddingBits
+          Output = bytesOut }
+
+    /// Reads the Huffman tree from the content and uses it to decode the text.        
+    let decode content =
+        let contentStart = bytesToInt content 0
+        let numPaddingBits = int content.[contentStart]
+        let treeMillisec, tree = time (fun () -> content |> Array.skip 4 |> fromBytes)
+        let elapsedMillisec, bytes = time (fun () -> decodeBytes contentStart numPaddingBits tree content)
+
+        { TreeParseMilliseconds = int treeMillisec
+          DecodeMilliseconds = int elapsedMillisec
+          Tree = tree
+          MetadataLength = contentStart + 4
+          Output = bytes }
