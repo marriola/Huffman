@@ -15,9 +15,9 @@ let decode options =
     let content = File.ReadAllBytes(inputFile)
     let contentStart = bytesToInt content 0
     let treeMillisec, tree = time (fun () -> content |> Array.skip 4 |> HuffmanTree.fromBytes)
-    let textLength = bytesToInt content contentStart
+    let numPaddingBits = int content.[contentStart]
 
-    let elapsedMillisec, decoded = time (fun () -> HuffmanTree.decode (contentStart + 4) textLength tree content)
+    let elapsedMillisec, decoded = time (fun () -> HuffmanTree.decode (contentStart + 1) numPaddingBits tree content)
 
     using
         (new BinaryWriter(File.Open(options.OutputFile, FileMode.Create)))
@@ -55,10 +55,10 @@ let encode options =
     // Show the code table with symbol frequencies
     query {
         for (symbol, freq) in Seq.countBy id content do
-            join (s, code) in codeTable
+            join (s, code) in codeTable 
                 on (symbol = byte s)
             sortByDescending freq
-            thenBy (snd code)
+            thenBy code
             select {
                 Symbol =
                     match symbol with
@@ -73,7 +73,7 @@ let encode options =
     }
     |> Seq.iter (fun x -> printfn "%s\t%d\t%s" x.Symbol x.Frequency x.Code)
 
-    let elapsedMillisec, (encodedLengthBits, encoded) = time (fun () -> HuffmanTree.encode tree content)
+    let elapsedMillisec, (numPaddingBits, encoded) = time (fun () -> HuffmanTree.encode tree content)
     let treeBytes = HuffmanTree.toBytes tree
 
     let originalLength = content.Length
@@ -87,7 +87,7 @@ let encode options =
             w.Write(metadataLength)
             w.Write(treeBytes)
             w.Write("ZZZZ" |> Seq.map byte |> Array.ofSeq)
-            w.Write(encodedLengthBits)
+            w.Write(numPaddingBits)
             w.Write(encoded))
 
     printfn "\nbuilt tree in %dms" treeMillisec

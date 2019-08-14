@@ -1,5 +1,7 @@
 ﻿namespace Huffman
 
+open System
+
 type HuffmanTree =
     | Leaf of char * int
     | Node of string * int * HuffmanTree * HuffmanTree
@@ -52,19 +54,19 @@ module HuffmanTree =
     /// Parses a Huffman tree from packed binary format.
     let fromBytes (bytes: byte[]) =
         let rec inner bits =
-            let next, bits = Seq.head bits, Seq.tail bits
+            let next, bits = List.head bits, List.tail bits
             match next with
             | false ->
-                let symbol = Seq.take 8 bits |> bitsToChar
-                let bits = Seq.skip 8 bits
+                let symbol = List.take 8 bits |> bitsToChar
+                let bits = List.skip 8 bits
                 bits, Leaf (symbol, 0)
             | true ->
                 let bits, left = inner bits
                 let bits, right = inner bits
                 bits, Node ("", 0, left, right)
         bytes
-        |> List.ofArray
         |> toBitStream
+        |> List.ofSeq
         |> inner
         |> snd
 
@@ -117,29 +119,36 @@ module HuffmanTree =
             |> Map.ofSeq
         let bits = Seq.map (fun c -> codeTable.[c]) content
         let bytesOut = packBits bits
-        let totalBits =
+        let numBits =
             bits
             |> Seq.map (fun (n, _) -> n)
             |> Seq.sum
-        totalBits, bytesOut
+        let numBytes = (float numBits) / 8.0
+        let totalBits = int (Math.Ceiling(numBytes) * 8.0)
+        let numPaddingBits = byte (totalBits - numBits)
+        numPaddingBits, bytesOut
         
-    let decode startPosition contentLength tree content =
-        let rec inner contentLength subtree out bits =
+    let decode startPosition numPaddingBits tree content =
+        let rec inner subtree out bits =
             match bits, subtree with
-            | [], _ ->
+            | [], Node _ ->
                 failwith "Ran out of input"
+            | [], Leaf (symbol, _) ->
+                byte symbol :: out |> List.rev
             | _, Leaf (symbol, _) ->
-                let out = (byte symbol) :: out
-                match contentLength with
-                | 0 -> List.rev out
-                | _ -> inner contentLength tree out bits
-            | x::xs, Node (_, _, _, right) when x ->
-                inner (contentLength - 1) right out xs
-            | _::xs, Node (_, _, left, _) ->
-                inner (contentLength - 1) left out xs
-        content
-        |> Seq.skip startPosition
-        |> toBitStream
+                inner tree (byte symbol :: out) bits
+            | false::xs, Node (_, _, left, _) ->
+                inner left out xs
+            | true::xs, Node (_, _, _, right) ->
+                inner right out xs
+
+        let bits =
+            content
+            |> Seq.skip startPosition
+            |> toBitStream
+
+        bits
+        |> Seq.take (Seq.length bits - numPaddingBits)
         |> List.ofSeq
-        |> inner contentLength tree []
+        |> inner tree []
         |> Array.ofList
