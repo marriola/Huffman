@@ -66,36 +66,43 @@ let getBytes bits lastPlace flush =
 
 /// Concatenates variable-length sequences of bits
 let packBits bits =
-    let (place, buf, ff) =
-        ((0, 0, []), bits)
-        ||> Seq.fold (fun (place, buf, ff) (codeLength, code) ->
-            if place + codeLength > 31 then
-                let buf = buf ||| (code <<< place)
-                let ff = getBytes buf 32 false @ ff
-                let codeShift = 32 - place
-                let buf = code >>> Math.Min(31, codeShift)
-                let place = codeLength - codeShift
-                (place, buf, ff)
-            else
-                let buf = buf ||| (code <<< place)
-                let place = place + codeLength
-                (place, buf, ff))
-    (getBytes buf place true @ ff)
-    |> List.rev
-    |> Array.ofList
+    let rec inner place bits buf out =
+        match bits with
+        | _ when place >= 8 ->
+            // Shift bytes from the buffer into out as long as there are 8 or more bits
+            inner
+                (place - 8)
+                bits
+                (buf >>> 8)
+                (byte (buf &&& 0xff) :: out)
+        | [] when place = 0 ->
+            0, out
+        | [] ->
+            let out = byte buf :: out
+            let paddingBits = 8 - place
+            paddingBits, out
+        | (codeLength, code)::xs ->
+            inner
+                (place + codeLength)
+                xs
+                (buf ||| (code <<< place))
+                out
+    let paddingBits, out = inner 0 bits 0 []
+    let out = out |> List.rev |> Array.ofList
+    paddingBits, out
 
 /// Converts a byte array into a lazily evlauated sequence of bits
 let toBitStream bytes =
     bytes
     |> Seq.collect (fun b ->
-        [ b &&& 1uy = 1uy
-          b &&& 2uy = 2uy
-          b &&& 4uy = 4uy
-          b &&& 8uy = 8uy
-          b &&& 16uy = 16uy
-          b &&& 32uy = 32uy
-          b &&& 64uy = 64uy
-          b &&& 128uy = 128uy ])
+        [| b &&& 1uy = 1uy;
+          b &&& 2uy = 2uy;
+          b &&& 4uy = 4uy;
+          b &&& 8uy = 8uy;
+          b &&& 16uy = 16uy;
+          b &&& 32uy = 32uy;
+          b &&& 64uy = 64uy;
+          b &&& 128uy = 128uy |])
 
 /// Converts a sequence of 8 bools to a char
 let bitsToChar bits =
