@@ -96,11 +96,11 @@ module HuffmanTree =
     /// Parses a Huffman tree from packed binary format.
     let private fromBytes (bytes: byte[]) =
         let rec inner bits =
-            let next, bits = List.head bits, List.tail bits
+            let next, bits = Seq.head bits, Seq.tail bits
             match next with
             | false ->
-                let symbol = List.take 8 bits |> bitsToChar
-                let bits = List.skip 8 bits
+                let symbol = Seq.take 8 bits |> bitsToChar
+                let bits = Seq.skip 8 bits
                 bits, Leaf (symbol, 0)
             | true ->
                 let bits, left = inner bits
@@ -108,7 +108,6 @@ module HuffmanTree =
                 bits, Node ("", 0, left, right)
         bytes
         |> toBitStream
-        |> List.ofSeq
         |> inner
         |> snd
 
@@ -163,28 +162,37 @@ module HuffmanTree =
         |> packBits
             
     let private decodeBytes contentStart numPaddingBits root content =
-        let rec inner subtree out bits =
-            match bits, subtree with
-            | [], Node _ ->
-                failwith "Ran out of input"
-            | [], Leaf (symbol, _) ->
-                byte symbol :: out |> List.rev
-            | _, Leaf (symbol, _) ->
-                inner root (byte symbol :: out) bits
-            | false::xs, Node (_, _, left, _) ->
-                inner left out xs
-            | true::xs, Node (_, _, _, right) ->
-                inner right out xs
-
         let bits =
             content
             |> Seq.skip (contentStart + 1)
             |> toBitStream
 
+        let contentLength = (Seq.length bits - numPaddingBits)
+        let bufferSize = contentLength / 4
+
+        let rec inner subtree remaining i out buflen buf bits =
+            if remaining = 0 then
+                match subtree with
+                | Node _ ->
+                    failwith "Ran out of input"
+                | Leaf (symbol, _) ->
+                    byte symbol :: out |> List.rev
+            elif i = buflen then
+                let nbits = Math.Min(Seq.length bits, bufferSize)
+                let buf = (Seq.take nbits bits |> Array.ofSeq)
+                let bits = (Seq.skip nbits bits)
+                inner subtree remaining 0 out nbits buf bits
+            else
+                match buf.[i], subtree with
+                | _, Leaf (symbol, _) ->
+                    inner root remaining i (byte symbol :: out) buflen buf bits
+                | false, Node (_, _, left, _) ->
+                    inner left (remaining - 1) (i + 1) out buflen buf bits
+                | true, Node (_, _, _, right) ->
+                    inner right (remaining - 1) (i + 1) out buflen buf bits
+
         bits
-        |> Seq.take (Seq.length bits - numPaddingBits)
-        |> List.ofSeq
-        |> inner root []
+        |> inner root contentLength 0 [] 0 [||]
         |> Array.ofList
 
     /// Creates a Huffman tree for the content and encodes it.
